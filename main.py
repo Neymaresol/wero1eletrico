@@ -6,7 +6,7 @@ import secrets
 import uuid
 
 SERVICE = "wero1eletrico"
-VERSION = "0.2.3-dev"
+VERSION = "0.2.4-dev"
 app = FastAPI(title=SERVICE, version=VERSION)
 
 @app.get("/")
@@ -95,3 +95,22 @@ def durability_check(x_diagnostic_token: str | None = Header(default=None)):
                     cur.execute("DELETE FROM wero1eletrico.offers WHERE offer_id=%s", (probe_id,))
         except Exception:
             pass
+
+@app.get("/health/db/durable-read")
+def durable_read_health():
+    """Read the noncommercial Neon sentinel through the staging API."""
+    if os.getenv("WERO_MODE") != "staging":
+        raise HTTPException(status_code=404, detail="not_found")
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""SELECT title, approved FROM wero1eletrico.offers
+                    WHERE offer_id = %s""", ("staging-gap03-durability-20261010",))
+                row = cur.fetchone()
+        if row != ("INTERNAL_STAGING_TEST", False):
+            raise RuntimeError("sentinel_missing")
+        return {"status": "ok", "service": SERVICE,
+                "durable_record": "verified", "approved": False,
+                "sales": "not_created"}
+    except Exception:
+        raise HTTPException(status_code=503, detail="durable_read_failed")
