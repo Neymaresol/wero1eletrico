@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI
 
 SERVICE = "wero1eletrico"
-VERSION = "0.1.0-dev"
+VERSION = "0.2.0-dev"
 app = FastAPI(title=SERVICE, version=VERSION)
 
 @app.get("/")
