@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException
 from db import connect
 
 SERVICE = "wero1eletrico"
-VERSION = "0.2.1-dev"
+VERSION = "0.2.2-dev"
 app = FastAPI(title=SERVICE, version=VERSION)
 
 @app.get("/")
@@ -32,3 +32,27 @@ def database_health():
         raise
     except Exception:
         raise HTTPException(status_code=503, detail="database_unavailable")
+
+@app.get("/health/db/persistence")
+def persistence_health():
+    """Staging-only transactional write/read verification; rolls back test row."""
+    if os.getenv("WERO_MODE") != "staging":
+        raise HTTPException(status_code=404, detail="not_found")
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT current_database()")
+                if cur.fetchone()[0] != "wero1eletrico":
+                    raise RuntimeError("wrong_database")
+                cur.execute("CREATE TEMP TABLE wero_probe (value TEXT NOT NULL) ON COMMIT DROP")
+                cur.execute("INSERT INTO wero_probe(value) VALUES (%s)", ("wero1eletrico-staging-probe",))
+                cur.execute("SELECT value FROM wero_probe")
+                verified = cur.fetchone()[0] == "wero1eletrico-staging-probe"
+            conn.rollback()
+        if not verified:
+            raise RuntimeError("readback_mismatch")
+        return {"status": "ok", "service": SERVICE, "database": "connected",
+                "write": "ok", "readback": "ok", "transaction": "rolled_back",
+                "scope": "temporary_staging_table"}
+    except Exception:
+        raise HTTPException(status_code=503, detail="persistence_check_failed")
