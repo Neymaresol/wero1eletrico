@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: wero1eletrico-staging
+    runtime: docker
+    plan: free
+    branch: dev/gap-01-bootstrap-20261010
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeployTrigger: "off"
+    envVars:
+      - key: WERO_MODE
+        value: staging
