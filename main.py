@@ -1,10 +1,12 @@
 import os
 from datetime import datetime, timezone
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from db import connect
+import secrets
+import uuid
 
 SERVICE = "wero1eletrico"
-VERSION = "0.2.2-dev"
+VERSION = "0.2.3-dev"
 app = FastAPI(title=SERVICE, version=VERSION)
 
 @app.get("/")
@@ -56,3 +58,40 @@ def persistence_health():
                 "scope": "temporary_staging_table"}
     except Exception:
         raise HTTPException(status_code=503, detail="persistence_check_failed")
+
+@app.post("/internal/db/durability-check")
+def durability_check(x_diagnostic_token: str | None = Header(default=None)):
+    """Authenticated staging-only committed write/read across two DB sessions."""
+    expected = os.getenv("WERO_ELETRICO_DIAGNOSTIC_TOKEN", "")
+    if os.getenv("WERO_MODE") != "staging" or not expected:
+        raise HTTPException(status_code=404, detail="not_found")
+    if not x_diagnostic_token or not secrets.compare_digest(x_diagnostic_token, expected):
+        raise HTTPException(status_code=403, detail="forbidden")
+    probe_id = "staging-probe-" + str(uuid.uuid4())
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT current_database()")
+                if cur.fetchone()[0] != "wero1eletrico":
+                    raise RuntimeError("wrong_database")
+                cur.execute("""INSERT INTO wero1eletrico.offers
+                    (offer_id, partner, title, affiliate_url, approved)
+                    VALUES (%s, %s, %s, %s, FALSE)""",
+                    (probe_id, "amazon", "INTERNAL_STAGING_TEST", "https://amazon.com.br/"))
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT title, approved FROM wero1eletrico.offers WHERE offer_id=%s", (probe_id,))
+                row = cur.fetchone()
+        if row != ("INTERNAL_STAGING_TEST", False):
+            raise RuntimeError("durability_readback_failed")
+        return {"status": "ok", "database": "connected", "committed_write": "ok",
+                "new_connection_readback": "ok", "financial_events": "not_created"}
+    except Exception:
+        raise HTTPException(status_code=503, detail="durability_check_failed")
+    finally:
+        try:
+            with connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM wero1eletrico.offers WHERE offer_id=%s", (probe_id,))
+        except Exception:
+            pass
