@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: wero1eletrico
+    runtime: docker
+    healthCheckPath: /health
+    envVars:
+      - key: WERO_MODE
+        value: homologation
+      - key: WERO_ADMIN_TOKEN
+        sync: false
