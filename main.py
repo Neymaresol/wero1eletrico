@@ -188,7 +188,7 @@ article{background:white;border:1px solid #d8e0e9;border-radius:12px;padding:20p
 article h2{font-size:18px}small{color:#536579}</style></head><body>
 <header><div><h1>Wero1Elétrico</h1><p>Catálogo de mobilidade elétrica — ambiente de testes</p></div></header>
 <main><h2>Categorias</h2>""" + categories + """<h2>Ofertas cadastradas</h2><section class="grid">""" + cards + """</section>
-<p>Os links de compra só serão liberados após validação de ofertas, aprovação e testes comerciais.</p></main></body></html>"""
+<p><a href="/vitrine">Ver vitrine de ofertas aprovadas</a></p><p>Os links de compra só serão liberados após validação de ofertas, aprovação e testes comerciais.</p></main></body></html>"""
 
 
 @app.get("/api/acquisition")
