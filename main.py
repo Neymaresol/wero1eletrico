@@ -1,12 +1,13 @@
 import os
 from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, Header
+from pydantic import BaseModel, Field
 from db import connect
 import secrets
 import uuid
 
 SERVICE = "wero1eletrico"
-VERSION = "0.3.0-dev"
+VERSION = "0.3.1-dev"
 app = FastAPI(title=SERVICE, version=VERSION)
 
 @app.get("/")
@@ -160,3 +161,56 @@ def commercial_acquisition():
                 "financial_rule": "Only authenticated partner confirmations; no synthetic sales"}
     except Exception:
         raise HTTPException(status_code=503, detail="acquisition_unavailable")
+
+
+class StagingOfferInput(BaseModel):
+    offer_id: str = Field(min_length=3, max_length=90, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]+$")
+    partner: str = Field(min_length=2, max_length=40)
+    title: str = Field(min_length=3, max_length=180)
+    affiliate_url: str = Field(min_length=12, max_length=2048)
+
+
+@app.post("/api/commercial/offers", status_code=201)
+def register_staging_offer(payload: StagingOfferInput,
+                           x_diagnostic_token: str | None = Header(default=None)):
+    """Authenticated staging-only registration; never approves or publishes."""
+    if os.getenv("WERO_MODE") != "staging":
+        raise HTTPException(status_code=404, detail="not_found")
+    expected = os.getenv("WERO_ELETRICO_DIAGNOSTIC_TOKEN", "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="staging_write_not_configured")
+    if not x_diagnostic_token or not secrets.compare_digest(x_diagnostic_token, expected):
+        raise HTTPException(status_code=403, detail="forbidden")
+    if payload.offer_id.startswith("staging-"):
+        raise HTTPException(status_code=422, detail="reserved_offer_id")
+    from affiliate_partners import AffiliateOffer, validate_offer
+    try:
+        validation = validate_offer(AffiliateOffer(
+            partner=payload.partner, title=payload.title,
+            affiliate_url=payload.affiliate_url))
+    except ValueError:
+        raise HTTPException(status_code=422, detail="invalid_partner_or_affiliate_url")
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""SELECT current_database()""")
+                if cur.fetchone()[0] != "wero1eletrico":
+                    raise RuntimeError("wrong_database")
+                cur.execute("""INSERT INTO wero1eletrico.offers
+                    (offer_id, partner, title, affiliate_url, approved)
+                    VALUES (%s, %s, %s, %s, FALSE)
+                    ON CONFLICT (offer_id) DO NOTHING
+                    RETURNING offer_id""",
+                    (payload.offer_id, payload.partner, payload.title,
+                     payload.affiliate_url))
+                inserted = cur.fetchone()
+        if not inserted:
+            raise HTTPException(status_code=409, detail="offer_already_exists")
+        return {"service": SERVICE, "mode": "staging",
+                "offer_id": inserted[0], "approved": False,
+                "publish_allowed": validation["publish_allowed"],
+                "sales_created": False}
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=503, detail="offer_registration_unavailable")
