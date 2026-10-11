@@ -1,6 +1,9 @@
 import os
 from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, Header
+from fastapi.responses import HTMLResponse
+from html import escape
+from catalog_categories import CATEGORIES
 from pydantic import BaseModel, Field
 from db import connect
 import secrets
@@ -135,6 +138,55 @@ def list_commercial_offers():
         ], "affiliate_urls_exposed": False}
     except Exception:
         raise HTTPException(status_code=503, detail="catalog_unavailable")
+
+
+@app.get("/api/catalog/categories")
+def catalog_categories():
+    """Editorial categories, not verified product inventory."""
+    return {"service": SERVICE, "mode": os.getenv("WERO_MODE", "development"),
+            "categories": list(CATEGORIES), "products_verified": False}
+
+
+@app.get("/catalogo", response_class=HTMLResponse)
+def catalog_page():
+    """Staging-only public preview; no unapproved affiliate redirects."""
+    if os.getenv("WERO_MODE") != "staging":
+        raise HTTPException(status_code=404, detail="not_found")
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""SELECT offer_id, partner, title, approved
+                    FROM wero1eletrico.offers
+                    WHERE offer_id NOT LIKE 'staging-%'
+                    ORDER BY created_at DESC LIMIT 200""")
+                rows = cur.fetchall()
+    except Exception:
+        raise HTTPException(status_code=503, detail="catalog_unavailable")
+    cards = "".join(
+        '<article><small>' + escape(str(partner)) + '</small><h2>' +
+        escape(str(title)) + '</h2><p>' +
+        ('Aprovada — publicação ainda não habilitada' if approved
+         else 'Aguardando aprovação do parceiro') +
+        '</p></article>'
+        for _id, partner, title, approved in rows
+    )
+    categories = "".join('<span class="category">' + escape(item["title"]) +
+                         '</span>' for item in CATEGORIES)
+    if not cards:
+        cards = '<p>Nenhum produto aprovado ou cadastrado nesta vitrine ainda.</p>'
+    return """<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wero1Elétrico | Catálogo em preparação</title>
+<style>body{font-family:system-ui;background:#f5f7fa;color:#14253b;margin:0}
+main{max-width:1050px;margin:auto;padding:36px 20px}header{background:#102a43;color:white;padding:32px 20px}
+header div{max-width:1050px;margin:auto}h1{margin:0 0 8px}.category{display:inline-block;
+background:#e0edf8;border-radius:20px;padding:10px;margin:5px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-top:22px}
+article{background:white;border:1px solid #d8e0e9;border-radius:12px;padding:20px}
+article h2{font-size:18px}small{color:#536579}</style></head><body>
+<header><div><h1>Wero1Elétrico</h1><p>Catálogo de mobilidade elétrica — ambiente de testes</p></div></header>
+<main><h2>Categorias</h2>""" + categories + """<h2>Ofertas cadastradas</h2><section class="grid">""" + cards + """</section>
+<p>Os links de compra só serão liberados após validação de ofertas, aprovação e testes comerciais.</p></main></body></html>"""
 
 
 @app.get("/api/acquisition")
