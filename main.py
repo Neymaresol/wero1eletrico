@@ -12,6 +12,8 @@ import uuid
 SERVICE = "wero1eletrico"
 VERSION = "0.3.1-dev"
 app = FastAPI(title=SERVICE, version=VERSION)
+from commercial_storefront import router as commercial_router
+app.include_router(commercial_router)
 
 @app.get("/")
 def root():
