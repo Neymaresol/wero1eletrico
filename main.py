@@ -6,7 +6,7 @@ import secrets
 import uuid
 
 SERVICE = "wero1eletrico"
-VERSION = "0.2.4-dev"
+VERSION = "0.3.0-dev"
 app = FastAPI(title=SERVICE, version=VERSION)
 
 @app.get("/")
@@ -114,3 +114,49 @@ def durable_read_health():
                 "sales": "not_created"}
     except Exception:
         raise HTTPException(status_code=503, detail="durable_read_failed")
+
+# Commercial staging foundation: read-only catalog and deterministic planning.
+# No external posting, outbound redirects, or simulated financial events.
+@app.get("/api/offers")
+def list_commercial_offers():
+    if os.getenv("WERO_MODE") != "staging":
+        raise HTTPException(status_code=404, detail="not_found")
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""SELECT offer_id, partner, title, approved, created_at
+                    FROM wero1eletrico.offers ORDER BY created_at DESC LIMIT 200""")
+                rows = cur.fetchall()
+        return {"service": SERVICE, "mode": "staging", "offers": [
+            {"id": row[0], "partner": row[1], "title": row[2],
+             "approved": row[3], "created_at": row[4].isoformat()}
+            for row in rows if not row[0].startswith("staging-")
+        ], "affiliate_urls_exposed": False}
+    except Exception:
+        raise HTTPException(status_code=503, detail="catalog_unavailable")
+
+
+@app.get("/api/acquisition")
+def commercial_acquisition():
+    if os.getenv("WERO_MODE") != "staging":
+        raise HTTPException(status_code=404, detail="not_found")
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""SELECT count(*), count(*) FILTER (WHERE approved)
+                    FROM wero1eletrico.offers
+                    WHERE offer_id NOT LIKE 'staging-%'""")
+                total, approved = cur.fetchone()
+                cur.execute("""SELECT event_type, count(*) FROM wero1eletrico.events
+                    GROUP BY event_type""")
+                events = dict(cur.fetchall())
+        return {"service": SERVICE, "version": VERSION, "mode": "staging",
+                "offers_total": total, "approved_offers": approved,
+                "recorded_visits": events.get("visit", 0),
+                "recorded_clicks": events.get("click", 0),
+                "partner_confirmed_sale_events": events.get("partner_confirmed_sale", 0),
+                "publication_verified": False,
+                "campaign_execution_enabled": False,
+                "financial_rule": "Only authenticated partner confirmations; no synthetic sales"}
+    except Exception:
+        raise HTTPException(status_code=503, detail="acquisition_unavailable")
