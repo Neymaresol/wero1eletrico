@@ -13,4 +13,10 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements-dev.txt
       - run: python -m compileall -q main.py
+      - name: Import app and commercial dependencies
+        run: python -c "import main; import commercial_storefront; import p0_offer_gate; assert main.app is not None"
+      - name: Build and smoke-test production Docker image
+        run: |
+          docker build -t wero1eletrico-p0 .
+          docker run --rm --entrypoint python wero1eletrico-p0 -c "import main; import commercial_storefront; import p0_offer_gate; assert main.app is not None"
       - run: pytest -q
