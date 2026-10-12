@@ -9,7 +9,8 @@ def test_commercial_router_parses_and_is_packaged():
     ast.parse(source)
     docker = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     main = (ROOT / "main.py").read_text(encoding="utf-8")
-    assert "commercial_storefront.py ./" in docker
+    copy_lines = [line.split() for line in docker.splitlines() if line.startswith("COPY ")]
+    assert any("commercial_storefront.py" in parts[1:-1] and "p0_offer_gate.py" in parts[1:-1] and parts[-1] == "./" for parts in copy_lines)
     assert "app.include_router(commercial_router)" in main
 
 def test_approval_requires_auth_and_evidence():
